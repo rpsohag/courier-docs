@@ -656,9 +656,11 @@ curl --location '{{base_url}}/v1.0.0-beta/charge/charge_calculator?delivery_area
 
 ## Webhook Integration
 
-Configure your webhook URL to receive real-time updates about parcel status changes directly from RedX.
+Configure your webhook URL to receive real-time updates about events directly from RedX. Ensure the URL is publicly accessible and can securely handle incoming POST requests.
 
 ### Webhook Configuration
+
+#### Callback URL Requirements
 
 **Method:** `POST`
 
@@ -669,9 +671,18 @@ Configure your webhook URL to receive real-time updates about parcel status chan
 https://example.com/callback?token=<token>
 ```
 
-> Any required credentials should be included in the query parameters of the URL
+> **Important:** Any required credentials should be included in the query parameters of the URL
 
-### Webhook Payload
+#### Configuration Guidelines
+
+1. **Public Accessibility:** Your webhook endpoint must be publicly accessible over the internet
+2. **SSL/TLS:** Use HTTPS endpoints for secure data transmission
+3. **Response Handling:** Return a `2xx` status code to acknowledge receipt of the webhook
+4. **Timeout:** Your endpoint should respond within 10 seconds
+5. **Retry Logic:** RedX will retry failed webhook deliveries (implement idempotency)
+6. **Authentication:** Include authentication tokens in query parameters for security
+
+#### Webhook Payload Format
 
 When a parcel status changes, RedX will send a POST request to your configured Callback URL with the following payload:
 
@@ -686,10 +697,23 @@ When a parcel status changes, RedX will send a POST request to your configured C
 }
 ```
 
-### Status Values
+#### Payload Fields
 
-| Status | Meaning |
-|--------|---------|
+| Field Name | Type | Description |
+|------------|------|-------------|
+| `tracking_number` | string | RedX tracking ID for the parcel |
+| `timestamp` | string | ISO 8601 timestamp of the status update |
+| `status` | string | Current status of the parcel (see status mapping below) |
+| `message_en` | string | Status message in English |
+| `message_bn` | string | Status message in Bengali |
+| `invoice_number` | string | Merchant's invoice/reference ID |
+
+### Status Values and Meanings
+
+The `status` field in the webhook payload indicates the current state of the parcel. Below are the possible status values:
+
+| MAPPED_STATUS | Meaning |
+|---------------|---------|
 | `ready-for-delivery` | Parcel received from merchants |
 | `delivery-in-progress` | Parcels have been dispatched to rider |
 | `delivered` | Parcels delivered by rider |
@@ -698,7 +722,62 @@ When a parcel status changes, RedX will send a POST request to your configured C
 | `returned` | Parcels returned |
 | `agent-area-change` | Area change requested & in progress |
 
-> Merchants should handle these status updates accordingly to keep their systems synchronized with the latest parcel status.
+> **Implementation Note:** Merchants should handle these status updates accordingly to keep their systems synchronized with the latest parcel status. We recommend implementing a status handler that maps RedX statuses to your internal order statuses.
+
+### Webhook Testing and Validation
+
+#### Testing Your Webhook
+
+1. **Use tools like ngrok** to create a local tunnel for testing
+2. **Verify payload structure** matches the expected format
+3. **Test authentication** by validating query parameters
+4. **Monitor response codes** - ensure your endpoint returns 200/201/204
+5. **Log all webhook events** for debugging and reconciliation
+
+#### Sample Webhook Handler Implementation (Pseudo-code)
+
+```javascript
+app.post('/webhook/redx', (req, res) => {
+  try {
+    // 1. Verify authentication token from query params
+    const token = req.query.token;
+    if (token !== process.env.REDX_WEBHOOK_TOKEN) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // 2. Validate payload structure
+    const { tracking_number, timestamp, status, message_en, message_bn, invoice_number } = req.body;
+    if (!tracking_number || !status) {
+      return res.status(400).json({ error: 'Invalid payload' });
+    }
+
+    // 3. Process the status update
+    updateParcelStatus(tracking_number, {
+      status,
+      timestamp,
+      message_en,
+      message_bn,
+      invoice_number
+    });
+
+    // 4. Acknowledge receipt
+    return res.status(200).json({ success: true });
+
+  } catch (error) {
+    console.error('Webhook processing error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+```
+
+#### Best Practices
+
+1. **Idempotency:** Handle duplicate webhook deliveries gracefully
+2. **Async Processing:** Process webhooks asynchronously to avoid timeouts
+3. **Logging:** Log all incoming webhooks with timestamps for audit trails
+4. **Monitoring:** Set up alerts for webhook delivery failures
+5. **Security:** Always validate webhook authentication
+6. **Database Transactions:** Use transactions when updating order status to maintain data consistency
 
 ---
 

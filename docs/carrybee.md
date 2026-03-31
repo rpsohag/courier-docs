@@ -847,21 +847,35 @@ curl --location '{{base_url}}/api/v2/orders/{{consignment_id}}/details' \
 
 ---
 
-## Webhook Events
+## Webhook Integration
 
-Carrybee sends webhook events to your registered URL when order status changes. Configure your webhook URL in your Carrybee dashboard.
+Configure your webhook URL in your Carrybee dashboard to receive real-time updates about order status changes.
+
+### Webhook Configuration
+
+**Method:** `POST`
+
+**Content-Type:** `application/json`
+
+**Webhook URL:** Configure in Carrybee dashboard
 
 ### Webhook Authentication
 
-Webhook requests include a signature header for verification:
+Carrybee sends webhook requests with a signature header for verification:
 
 ```http
 X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 ```
 
-### Webhook Events
+> **Note:** The signature/credential is provided by you so that you can verify that the request is sent from the Carrybee server and not from someone else.
+
+### Webhook Event Payloads
 
 #### 1. Order Created
+
+**Event:** `order.created`
+
+**Payload:**
 ```json
 {
   "event": "order.created",
@@ -875,7 +889,23 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- `event` (string): The current event name
+- `store_id`, `consignment_id` (string): Store and consignment identifiers
+- `merchant_order_id` (null|string): Your merchant order ID
+- `timestamptz` (string): Timestamp when the event occurred (ISO 8601)
+- `collectable_amount` (string): Amount to collect, wrapping an integer
+- `cod_fee` (float): Cash on delivery fee
+- `delivery_fee` (string): Delivery charge, wrapping an integer
+- **All amounts are in Taka**
+
+---
+
 #### 2. Order Updated
+
+**Event:** `order.updated`
+
+**Payload:**
 ```json
 {
   "event": "order.updated",
@@ -889,7 +919,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Order Created
+
+---
+
 #### 3. Pickup Requested
+
+**Event:** `order.pickup-requested`
+
+**Payload:**
 ```json
 {
   "event": "order.pickup-requested",
@@ -900,7 +938,19 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- `event` (string): The current event name
+- `store_id`, `consignment_id` (string): Store and consignment identifiers
+- `merchant_order_id` (null|string): Your merchant order ID
+- `timestamptz` (string): Timestamp when the event occurred (ISO 8601)
+
+---
+
 #### 4. Assigned for Pickup
+
+**Event:** `order.assigned-for-pickup`
+
+**Payload:**
 ```json
 {
   "event": "order.assigned-for-pickup",
@@ -911,7 +961,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 5. Picked
+
+**Event:** `order.picked`
+
+**Payload:**
 ```json
 {
   "event": "order.picked",
@@ -922,7 +980,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 6. Pickup Failed
+
+**Event:** `order.pickup-failed`
+
+**Payload:**
 ```json
 {
   "event": "order.pickup-failed",
@@ -933,7 +999,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 7. Pickup Cancelled
+
+**Event:** `order.pickup-cancelled`
+
+**Payload:**
 ```json
 {
   "event": "order.pickup-cancelled",
@@ -944,7 +1018,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 8. At the Sorting Hub
+
+**Event:** `order.at-the-sorting-hub`
+
+**Payload:**
 ```json
 {
   "event": "order.at-the-sorting-hub",
@@ -955,7 +1037,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 9. On the Way to Central Warehouse
+
+**Event:** `order.on-the-way-to-central-warehouse`
+
+**Payload:**
 ```json
 {
   "event": "order.on-the-way-to-central-warehouse",
@@ -966,7 +1056,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 10. At Central Warehouse
+
+**Event:** `order.at-central-warehouse`
+
+**Payload:**
 ```json
 {
   "event": "order.at-central-warehouse",
@@ -977,7 +1075,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 11. In Transit
+
+**Event:** `order.in-transit`
+
+**Payload:**
 ```json
 {
   "event": "order.in-transit",
@@ -988,7 +1094,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 12. Received at Last Mile Hub
+
+**Event:** `order.received-at-last-mile-hub`
+
+**Payload:**
 ```json
 {
   "event": "order.received-at-last-mile-hub",
@@ -999,7 +1113,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 13. Assigned for Delivery
+
+**Event:** `order.assigned-for-delivery`
+
+**Payload:**
 ```json
 {
   "event": "order.assigned-for-delivery",
@@ -1011,7 +1133,17 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `attempt` (integer): Number of delivery attempts
+
+---
+
 #### 14. Delivery On Hold
+
+**Event:** `order.delivery-on-hold`
+
+**Payload:**
 ```json
 {
   "event": "order.delivery-on-hold",
@@ -1024,7 +1156,18 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `attempt` (integer): Number of delivery attempts
+- `reason` (null|string): Reason why delivery is on hold (may be null or contain data)
+
+---
+
 #### 15. Delivered
+
+**Event:** `order.delivered`
+
+**Payload:**
 ```json
 {
   "event": "order.delivered",
@@ -1037,7 +1180,19 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `collected_amount` (string): Amount collected from customer, wrapping an integer
+- `attempt` (integer): Number of delivery attempts
+- **All amounts are in Taka**
+
+---
+
 #### 16. Partial Delivery
+
+**Event:** `order.partial-delivery`
+
+**Payload:**
 ```json
 {
   "event": "order.partial-delivery",
@@ -1051,7 +1206,20 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `collected_amount` (string): Amount collected from customer, wrapping an integer
+- `reason` (null|string): Reason for partial delivery (may be null or contain data)
+- `attempt` (integer): Number of delivery attempts
+- **All amounts are in Taka**
+
+---
+
 #### 17. Delivery Failed
+
+**Event:** `order.delivery-failed`
+
+**Payload:**
 ```json
 {
   "event": "order.delivery-failed",
@@ -1064,7 +1232,18 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `reason` (null|string): Reason for delivery failure (may be null or contain data)
+- `attempt` (integer): Number of delivery attempts
+
+---
+
 #### 18. Returned
+
+**Event:** `order.returned`
+
+**Payload:**
 ```json
 {
   "event": "order.returned",
@@ -1076,7 +1255,17 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `reason` (null|string): Reason for return (may be null or contain data)
+
+---
+
 #### 19. Paid Return
+
+**Event:** `order.paid-return`
+
+**Payload:**
 ```json
 {
   "event": "order.paid-return",
@@ -1090,7 +1279,20 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `collected_amount` (string): Amount collected, wrapping an integer
+- `reason` (null|string): Reason for paid return (may be null or contain data)
+- `attempt` (integer): Number of delivery attempts
+- **All amounts are in Taka**
+
+---
+
 #### 20. Exchange
+
+**Event:** `order.exchange`
+
+**Payload:**
 ```json
 {
   "event": "order.exchange",
@@ -1103,7 +1305,19 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `collected_amount` (string): Amount collected, wrapping an integer
+- `reason` (null|string): Reason for exchange (may be null or contain data)
+- **All amounts are in Taka**
+
+---
+
 #### 21. Paid
+
+**Event:** `order.paid`
+
+**Payload:**
 ```json
 {
   "event": "order.paid",
@@ -1115,7 +1329,17 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:**
+- Same basic fields as Pickup Requested
+- `invoice_id` (string): Invoice identifier
+
+---
+
 #### 22. Returned at Sorting
+
+**Event:** `order.returned-at-sorting`
+
+**Payload:**
 ```json
 {
   "event": "order.returned-at-sorting",
@@ -1126,7 +1350,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 23. Returned In Transit
+
+**Event:** `order.returned-in-transit`
+
+**Payload:**
 ```json
 {
   "event": "order.returned-in-transit",
@@ -1137,7 +1369,15 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
 #### 24. Returned to Merchant
+
+**Event:** `order.returned-to-merchant`
+
+**Payload:**
 ```json
 {
   "event": "order.returned-to-merchant",
@@ -1148,22 +1388,57 @@ X-Carrybee-Webhook-Signature: {{WEBHOOK_SIGNATURE}}
 }
 ```
 
+**Field Notes:** Same as Pickup Requested
+
+---
+
+### Testing Your Webhook
+
+You can test your webhook endpoint using curl:
+
+**Request:**
+```bash
+curl --location '{{webhook_url}}' \
+--header 'X-Carrybee-Webhook-Signature: "{{WEBHOOK_SIGNATURE}}"' \
+--data '{
+     "content": "your webhook event data"
+}'
+```
+
+**Parameters:**
+- `{{webhook_url}}`: The URL you provided - this is where you'll receive the data based on your subscription
+- `{{WEBHOOK_SIGNATURE}}`: The signature/credential you provided - use this to verify requests are from Carrybee server
+- **content**: The data section will contain the actual event data based on the event you have subscribed to, exactly as specified in the event section above
+
 ### Common Webhook Fields
 
 | Field Name | Field Type | Description |
 |------------|------------|-------------|
-| event | string | Event name |
-| store_id | string | Store ID |
-| consignment_id | string | Consignment ID |
-| merchant_order_id | string/null | Merchant order ID |
-| timestamptz | string | Event timestamp (ISO 8601) |
-| collectable_amount | string | Amount to collect (in Taka) |
-| cod_fee | float | COD fee |
-| delivery_fee | string | Delivery fee (in Taka) |
-| collected_amount | string | Amount collected (in Taka) |
-| attempt | integer | Delivery attempt number |
-| reason | string/null | Reason for status change |
-| invoice_id | string | Invoice ID |
+| `event` | string | Event name identifier |
+| `store_id` | string | Store ID |
+| `consignment_id` | string | Consignment ID |
+| `merchant_order_id` | string/null | Merchant order ID (nullable) |
+| `timestamptz` | string | Event timestamp (ISO 8601 format) |
+| `collectable_amount` | string | Amount to collect in Taka (string wrapping integer) |
+| `cod_fee` | float | Cash on delivery fee |
+| `delivery_fee` | string | Delivery fee in Taka (string wrapping integer) |
+| `collected_amount` | string | Amount collected in Taka (string wrapping integer) |
+| `attempt` | integer | Delivery attempt number |
+| `reason` | string/null | Reason for status change (nullable) |
+| `invoice_id` | string | Invoice ID |
+
+### Webhook Best Practices
+
+1. **Signature Verification:** Always verify the `X-Carrybee-Webhook-Signature` header to ensure requests are from Carrybee
+2. **Idempotency:** Handle duplicate webhook deliveries gracefully (check `consignment_id` and `timestamptz`)
+3. **Async Processing:** Process webhooks asynchronously to avoid timeouts
+4. **Event Logging:** Log all incoming webhooks with timestamps for audit trails
+5. **Error Handling:** Implement robust error handling without exposing sensitive information
+6. **Response Time:** Respond quickly (within 5 seconds) with appropriate status codes
+7. **Event Mapping:** Map Carrybee events to your internal order statuses
+8. **Database Transactions:** Use transactions when updating order status to maintain data consistency
+9. **Testing:** Thoroughly test webhook handling before production deployment
+10. **Monitoring:** Set up alerts for webhook delivery failures
 
 ---
 

@@ -704,6 +704,258 @@ curl --location '{{base_url}}/aladdin/api/v1/stores' \
 
 ---
 
+## Webhook Integration
+
+You can choose to integrate webhook for status updates of your individual delivery. You only need to provide a Callback URL and Webhook secret, where you will receive a POST request containing event details.
+
+### Webhook Configuration
+
+#### Callback URL Requirements
+
+**Method:** `POST`
+
+**Content-Type:** `application/json`
+
+**Callback URL Structure:**
+```
+https://example.com/status-update
+```
+
+#### Configuration Guidelines
+
+Your webhook endpoint must meet the following requirements:
+
+1. **Reachable:** Your URL should be publicly accessible over the internet
+2. **Redirection Limit:** Your URL should be resolved within 3 redirections
+3. **SSL Certificate:** If using HTTPS, your SSL certificate should be valid
+4. **Response Time:** Your URL should respond within 10 seconds
+5. **Status Code:** Your URL should return status code `202` for successful webhook handling
+6. **Response Header:** Your URL should return a response with header `X-Pathao-Merchant-Webhook-Integration-Secret`
+7. **Secret Validation:** The header `X-Pathao-Merchant-Webhook-Integration-Secret` value should contain exactly `f3992ecc-59da-4cbe-a049-a13da2018d51`
+
+#### Webhook Secret
+
+Provide a secret key during webhook integration setup. This secret will be used to verify webhook authenticity.
+
+**Example:**
+```
+f3992ecc-59da-4cbe-a049-a13da2018d51
+```
+
+### Webhook Authentication
+
+Pathao sends webhook requests with the following headers for verification:
+
+```http
+X-PATHAO-Signature: <your_webhook_secret>
+Content-Type: application/json
+```
+
+**Headers Table:**
+
+| Header Name | Header Value | Description |
+|-------------|--------------|-------------|
+| `X-PATHAO-Signature` | Secret provided by you during integration | Your webhook secret for authentication |
+| `Content-Type` | `application/json` | Content type of the payload |
+
+### Event Types
+
+You can subscribe to the following webhook events:
+
+#### Order Events
+1. **Order Created** - `order.created`
+2. **Order Updated** - `order.updated`
+3. **Pickup Requested** - `pickup.requested`
+4. **Assigned For Pickup** - `pickup.assigned`
+5. **Pickup** - `pickup.picked`
+6. **Pickup Failed** - `pickup.failed`
+7. **Pickup Cancelled** - `pickup.cancelled`
+8. **At the Sorting Hub** - `at.sorting.hub`
+9. **In Transit** - `in.transit`
+10. **Received at Last Mile Hub** - `received.last.mile.hub`
+11. **Assigned for Delivery** - `delivery.assigned`
+12. **Delivered** - `delivered`
+13. **Partial Delivery** - `partial.delivery`
+14. **Return** - `return`
+15. **Delivery Failed** - `delivery.failed`
+16. **On Hold** - `on.hold`
+17. **Payment Invoice** - `payment.invoice`
+18. **Paid Return** - `paid.return`
+19. **Exchange** - `exchange`
+
+#### Store Events
+20. **Store Created** - `store.created`
+21. **Store Updated** - `store.updated`
+
+### Webhook Payload Format
+
+#### Order Created Event
+
+**Sample Payload:**
+```json
+{
+  "consignment_id": "DL121224VS8TTJ",
+  "merchant_order_id": "TS-123",
+  "updated_at": "2024-12-27 23:49:43",
+  "timestamp": "2024-12-27T17:49:43+00:00",
+  "store_id": 130820,
+  "event": "order.created",
+  "delivery_fee": 83.46
+}
+```
+
+#### Common Event Payload Structure
+
+Most webhook events follow this structure:
+
+```json
+{
+  "consignment_id": "<CONSIGNMENT_ID>",
+  "merchant_order_id": "<MERCHANT_ORDER_ID>",
+  "updated_at": "<UPDATED_AT>",
+  "timestamp": "<ISO_TIMESTAMP>",
+  "store_id": <STORE_ID>,
+  "event": "<EVENT_TYPE>",
+  "delivery_fee": <DELIVERY_FEE>
+}
+```
+
+#### Store Created Event
+
+**Sample Payload:**
+```json
+{
+  "event": "webhook_integration",
+  "store_id": <STORE_ID>,
+  "timestamp": "<ISO_TIMESTAMP>"
+}
+```
+
+### Payload Fields
+
+| Field Name | Type | Description |
+|------------|------|-------------|
+| `consignment_id` | string | Pathao consignment ID for the order |
+| `merchant_order_id` | string | Your merchant order ID (optional) |
+| `updated_at` | string | Last update timestamp (format: YYYY-MM-DD HH:MM:SS) |
+| `timestamp` | string | ISO 8601 timestamp of the event |
+| `store_id` | integer | Store ID associated with the order |
+| `event` | string | Event type identifier |
+| `delivery_fee` | float | Delivery fee for the order |
+
+### Webhook Testing and Validation
+
+#### Integration Test Event
+
+When you first configure your webhook, you will receive a test event:
+
+```json
+{
+  "event": "webhook_integration"
+}
+```
+
+#### Testing Your Webhook
+
+1. **Use tools like ngrok** to create a local tunnel for testing
+2. **Verify signature** by comparing `X-PATHAO-Signature` header with your secret
+3. **Test response requirements:**
+   - Return HTTP status code `202`
+   - Include header `X-Pathao-Merchant-Webhook-Integration-Secret`
+   - Set the header value to your secret: `f3992ecc-59da-4cbe-a049-a13da2018d51`
+4. **Monitor response time** - ensure your endpoint responds within 10 seconds
+5. **Test SSL certificate** - verify your HTTPS certificate is valid
+
+#### Sample Webhook Handler Implementation (Pseudo-code)
+
+```javascript
+app.post('/webhook/pathao', (req, res) => {
+  try {
+    // 1. Verify webhook signature
+    const signature = req.headers['x-pathao-signature'];
+    const webhookSecret = process.env.PATHAO_WEBHOOK_SECRET;
+
+    if (signature !== webhookSecret) {
+      console.error('Invalid webhook signature');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // 2. Validate payload structure
+    const { event, consignment_id, merchant_order_id, timestamp } = req.body;
+    if (!event) {
+      return res.status(400).json({ error: 'Invalid payload' });
+    }
+
+    // 3. Process the event based on type
+    switch (event) {
+      case 'order.created':
+        handleOrderCreated(req.body);
+        break;
+      case 'delivered':
+        handleOrderDelivered(req.body);
+        break;
+      case 'return':
+        handleOrderReturn(req.body);
+        break;
+      // ... handle other events
+      default:
+        console.log('Unhandled event:', event);
+    }
+
+    // 4. Acknowledge receipt with required response
+    return res.status(202)
+      .set('X-Pathao-Merchant-Webhook-Integration-Secret', webhookSecret)
+      .json({ success: true });
+
+  } catch (error) {
+    console.error('Webhook processing error:', error);
+    // Still return 202 to avoid retries for handled errors
+    return res.status(202)
+      .set('X-Pathao-Merchant-Webhook-Integration-Secret', process.env.PATHAO_WEBHOOK_SECRET)
+      .json({ success: false, error: 'Processing failed' });
+  }
+});
+```
+
+#### Best Practices
+
+1. **Idempotency:** Handle duplicate webhook deliveries gracefully (check `consignment_id` and `timestamp`)
+2. **Async Processing:** Process webhooks asynchronously to avoid timeouts
+3. **Event Logging:** Log all incoming webhooks with timestamps for audit trails
+4. **Signature Verification:** Always verify the `X-PATHAO-Signature` header
+5. **Response Requirements:** Always return 202 status code with the required header
+6. **Error Handling:** Implement robust error handling without exposing sensitive information
+7. **Monitoring:** Set up alerts for webhook delivery failures
+8. **Event Mapping:** Map Pathao events to your internal order statuses
+9. **Database Transactions:** Use transactions when updating order status to maintain data consistency
+10. **Testing:** Thoroughly test webhook handling before production deployment
+
+#### Response Requirements Summary
+
+Your webhook endpoint **MUST**:
+
+- Return HTTP status code `202 Accepted`
+- Include the response header: `X-Pathao-Merchant-Webhook-Integration-Secret`
+- Set the header value to your configured secret: `f3992ecc-59da-4cbe-a049-a13da2018d51`
+- Respond within 10 seconds
+- Be accessible via HTTPS with valid SSL certificate
+
+**Example Response Headers:**
+```http
+HTTP/1.1 202 Accepted
+X-Pathao-Merchant-Webhook-Integration-Secret: f3992ecc-59da-4cbe-a049-a13da2018d51
+Content-Type: application/json
+```
+
+**Example Response Body:**
+```json
+{
+  "success": true
+}
+```
+
+---
+
 ## Quick Reference - All Endpoints
 
 ### Base URLs

@@ -33,7 +33,8 @@ courier-pkg/
 │   │   ├── CourierException.php
 │   │   ├── AuthenticationException.php
 │   │   ├── ValidationException.php
-│   │   └── ProviderNotSupportedException.php
+│   │   ├── ProviderNotSupportedException.php
+│   │   └── WebhookVerificationException.php
 │   ├── Facades/
 │   │   └── Courier.php                      # Static facade
 │   ├── Factory/
@@ -58,11 +59,43 @@ courier-pkg/
 │   │   ├── CacheManager.php
 │   │   ├── TokenManager.php                 # OAuth token management
 │   │   └── ResponseNormalizer.php
+│   ├── Webhook/
+│   │   ├── WebhookController.php            # Handle incoming webhooks
+│   │   ├── WebhookEvent.php                 # Unified event model
+│   │   ├── Verifiers/
+│   │   │   ├── PaperflyVerifier.php
+│   │   │   ├── RedXVerifier.php
+│   │   │   ├── CarrybeeVerifier.php
+│   │   │   └── PathaoVerifier.php
+│   │   ├── Normalizers/
+│   │   │   ├── PaperflyNormalizer.php
+│   │   │   ├── RedXNormalizer.php
+│   │   │   ├── CarrybeeNormalizer.php
+│   │   │   └── PathaoNormalizer.php
+│   │   ├── Jobs/
+│   │   │   └── ProcessWebhookEvent.php      # Async webhook processing
+│   │   └── Listeners/
+│   │       ├── ParcelCreatedListener.php
+│   │       ├── ParcelDeliveredListener.php
+│   │       ├── ParcelReturnedListener.php
+│   │       └── ParcelFailedListener.php
 │   └── config/
 │       └── courier.php
+├── database/
+│   └── migrations/
+│       ├── create_courier_orders_table.php
+│       └── create_webhook_logs_table.php
 ├── tests/
 │   ├── Unit/
+│   │   ├── Providers/
+│   │   ├── Webhook/
+│   │   │   ├── Verifiers/
+│   │   │   └── Normalizers/
+│   │   └── Support/
 │   └── Feature/
+│       ├── OrderCreationTest.php
+│       ├── WebhookHandlingTest.php
+│       └── WebhookIntegrationTest.php
 ├── composer.json
 ├── README.md
 └── LICENSE.md
@@ -229,14 +262,105 @@ protected function getAuthHeaders(): array
 - Auto-refresh when token expires (5 day TTL)
 - Cache tokens to reduce API calls
 
-#### Phase 4: Advanced Features (Days 15-18)
+#### Phase 4: Webhook Integration System (Days 15-18)
 
 **Features to implement:**
 
-1. **CacheManager** - Cache locations, stores, tokens
-2. **TokenManager** - OAuth token lifecycle management
-3. **WebhookController** - Handle webhook events
-4. **Bulk operation enhancements** - Chunking, progress tracking
+1. **WebhookController** - Handle webhook events from all couriers
+2. **WebhookNormalizer** - Normalize different webhook payload formats
+3. **WebhookVerifier** - Authentication/verification for each courier
+4. **WebhookEvent** - Unified event structure
+5. **WebhookLogger** - Database logging for all webhooks
+6. **CacheManager** - Cache locations, stores, tokens
+7. **TokenManager** - OAuth token lifecycle management
+8. **Bulk operation enhancements** - Chunking, progress tracking
+
+**Webhook Architecture:**
+
+```
+POST /webhooks/{courier}
+    ↓
+WebhookController (verify → normalize → dispatch)
+    ↓
+Queue Job (async processing)
+    ↓
+Event Handler (update order status, trigger business logic)
+    ↓
+Database (courier_orders, webhook_logs)
+```
+
+**Supported Couriers Webhook Summary:**
+
+| Courier | Events | Authentication | Timeout | Retry |
+|---------|--------|----------------|---------|-------|
+| **Paperfly** | 14 events | X-Paperfly-Secret header | 30s | 3x |
+| **RedX** | 7 events | Query parameter token | 10s | Standard |
+| **Carrybee** | 24 events | Signature header | Standard | Standard |
+| **Pathao** | 21 events | Signature + response header | 10s | Standard |
+| **Steadfast** | 0 events | Polling only | - | - |
+
+**Key Implementation Files:**
+
+1. **`src/Webhook/WebhookController.php`** - Main webhook entry point
+2. **`src/Webhook/Verifiers/`** - Authentication for each courier
+3. **`src/Webhook/Normalizers/`** - Payload normalization
+4. **`src/Webhook/WebhookEvent.php`** - Unified event model
+5. **`src/Webhook/Jobs/ProcessWebhookEvent.php`** - Async processing
+6. **`src/Webhook/Listeners/`** - Event handlers
+7. **database/migrations/create_webhook_tables.php`** - Database schema
+
+**Authentication Per Courier:**
+
+```php
+// Paperfly: Header-based secret
+protected function verifyPaperfly(Request $request): bool
+{
+    $secret = $request->header('X-Paperfly-Secret');
+    return hash_equals(config('courier.paperfly.webhook_secret'), $secret);
+}
+
+// RedX: Query parameter
+protected function verifyRedX(Request $request): bool
+{
+    $token = $request->query('token');
+    return hash_equals(config('courier.redx.webhook_token'), $token);
+}
+
+// Carrybee: Signature header
+protected function verifyCarrybee(Request $request): bool
+{
+    $signature = $request->header('X-Carrybee-Webhook-Signature');
+    return hash_equals(config('courier.carrybee.webhook_signature'), $signature);
+}
+
+// Pathao: Signature header + special response header
+protected function verifyPathao(Request $request): bool
+{
+    $signature = $request->header('X-PATHAO-Signature');
+    return hash_equals(config('courier.pathao.webhook_secret'), $signature);
+}
+
+// Pathao response
+protected function sendPathaoResponse(Response $response): Response
+{
+    return $response->header(
+        'X-Pathao-Merchant-Webhook-Integration-Secret',
+        config('courier.pathao.webhook_secret')
+    );
+}
+```
+
+**Event Mapping:**
+
+| Internal Event | Paperfly | RedX | Carrybee | Pathao |
+|----------------|----------|------|----------|--------|
+| `parcel.created` | parcel.created | - | order.created | order.created |
+| `parcel.picked_up` | parcel.picked_up | - | order.picked | - |
+| `parcel.in_transit` | parcel.in_transit | delivery-in-progress | order.in-transit | in.transit |
+| `parcel.delivered` | parcel.delivered | delivered | order.delivered | delivered |
+| `parcel.partial` | parcel.partial | - | order.partial-delivery | partial.delivery |
+| `parcel.returned` | parcel.return | returned | order.returned | return |
+| `parcel.on_hold` | parcel.on_hold | agent-hold | order.delivery-on-hold | on.hold |
 
 #### Phase 5: Testing & Documentation (Days 19-21)
 
@@ -268,6 +392,9 @@ return [
             'base_url' => env('STEADFAST_BASE_URL', 'https://portal.packzy.com/api/v1'),
             'api_key' => env('STEADFAST_API_KEY'),
             'secret_key' => env('STEADFAST_SECRET_KEY'),
+            'webhook' => [
+                'enabled' => false, // Steadfast doesn't support webhooks
+            ],
         ],
 
         'redx' => [
@@ -275,6 +402,11 @@ return [
             'sandbox_url' => env('REDX_SANDBOX_URL', 'https://sandbox.redx.com.bd/v1.0.0-beta'),
             'api_token' => env('REDX_API_TOKEN'),
             'sandbox' => env('REDX_SANDBOX', false),
+            'webhook' => [
+                'enabled' => true,
+                'token' => env('REDX_WEBHOOK_TOKEN'),
+                'timeout' => 10, // seconds
+            ],
         ],
 
         'carrybee' => [
@@ -282,6 +414,11 @@ return [
             'client_id' => env('CARRYBEE_CLIENT_ID'),
             'client_secret' => env('CARRYBEE_CLIENT_SECRET'),
             'client_context' => env('CARRYBEE_CLIENT_CONTEXT'),
+            'webhook' => [
+                'enabled' => true,
+                'signature' => env('CARRYBEE_WEBHOOK_SIGNATURE'),
+                'timeout' => 10,
+            ],
         ],
 
         'pathao' => [
@@ -292,12 +429,24 @@ return [
             'username' => env('PATHAO_USERNAME'),
             'password' => env('PATHAO_PASSWORD'),
             'sandbox' => env('PATHAO_SANDBOX', false),
+            'webhook' => [
+                'enabled' => true,
+                'secret' => env('PATHAO_WEBHOOK_SECRET', 'f3992ecc-59da-4cbe-a049-a13da2018d51'),
+                'timeout' => 10,
+                'response_secret' => env('PATHAO_WEBHOOK_SECRET'),
+            ],
         ],
 
         'paperfly' => [
             'base_url' => env('PAPERFLY_BASE_URL', 'https://api.paperfly.com.bd'),
             'username' => env('PAPERFLY_USERNAME'),
             'password' => env('PAPERFLY_PASSWORD'),
+            'webhook' => [
+                'enabled' => true,
+                'secret' => env('PAPERFLY_WEBHOOK_SECRET'),
+                'timeout' => 30, // Paperfly has 30s timeout
+                'retry_max' => 3, // Paperfly retries up to 3 times
+            ],
         ],
     ],
 
@@ -305,7 +454,51 @@ return [
         'enabled' => env('COURIER_CACHE_ENABLED', true),
         'ttl' => env('COURIER_CACHE_TTL', 86400), // 24 hours
     ],
+
+    'webhook' => [
+        'queue' => env('COURIER_WEBHOOK_QUEUE', 'webhooks'),
+        'middleware' => ['throttle:webhooks'],
+        'log_retention_days' => 90,
+    ],
 ];
+```
+
+**Environment Variables (.env):**
+
+```env
+# Courier Selection
+COURIER_DRIVER=steadfast
+
+# Steadfast
+STEADFAST_API_KEY=your_api_key
+STEADFAST_SECRET_KEY=your_secret_key
+
+# RedX
+REDX_API_TOKEN=your_api_token
+REDX_WEBHOOK_TOKEN=your_webhook_token
+
+# Carrybee
+CARRYBEE_CLIENT_ID=your_client_id
+CARRYBEE_CLIENT_SECRET=your_client_secret
+CARRYBEE_CLIENT_CONTEXT=your_client_context
+CARRYBEE_WEBHOOK_SIGNATURE=your_webhook_signature
+
+# Pathao
+PATHAO_CLIENT_ID=your_client_id
+PATHAO_CLIENT_SECRET=your_client_secret
+PATHAO_USERNAME=your_email
+PATHAO_PASSWORD=your_password
+PATHAO_WEBHOOK_SECRET=f3992ecc-59da-4cbe-a049-a13da2018d51
+
+# Paperfly
+PAPERFLY_USERNAME=your_username
+PAPERFLY_PASSWORD=your_password
+PAPERFLY_WEBHOOK_SECRET=your_webhook_secret
+
+# Webhook Settings
+COURIER_WEBHOOK_QUEUE=webhooks
+COURIER_CACHE_ENABLED=true
+COURIER_CACHE_TTL=86400
 ```
 
 **`composer.json`:**
@@ -398,6 +591,117 @@ try {
 }
 ```
 
+### Webhook Setup
+
+**1. Define Routes:**
+
+```php
+// routes/web.php or routes/api.php
+Route::post('/webhooks/paperfly', [WebhookController::class, 'handlePaperfly']);
+Route::post('/webhooks/redx', [WebhookController::class, 'handleRedX']);
+Route::post('/webhooks/carrybee', [WebhookController::class, 'handleCarrybee']);
+Route::post('/webhooks/pathao', [WebhookController::class, 'handlePathao']);
+```
+
+**2. Webhook Controller:**
+
+```php
+use Courier\Webhook\WebhookController;
+use Illuminate\Http\Request;
+use Courier\Facades\Courier;
+
+class WebhookController extends Controller
+{
+    public function handle(Request $request, string $courier)
+    {
+        // Package will handle:
+        // 1. Authentication/verification
+        // 2. Payload normalization
+        // 3. Duplicate detection
+        // 4. Async dispatching
+
+        return Courier::handleWebhook($request, $courier);
+    }
+}
+```
+
+**3. Event Listeners:**
+
+```php
+// app/Providers/EventServiceProvider.php
+protected $listen = [
+    \Courier\Webhook\Events\ParcelDelivered::class => [
+        \App\Listeners\UpdateOrderStatus::class,
+        \App\Listeners\SendDeliveryNotification::class,
+        \App\Listeners\CreateInvoice::class,
+    ],
+    \Courier\Webhook\Events\ParcelReturned::class => [
+        \App\Listeners\ProcessReturn::class,
+        \App\Listeners\InitiateRefund::class,
+    ],
+];
+```
+
+**4. Custom Event Handler:**
+
+```php
+use Courier\Webhook\Events\WebhookReceived;
+use Courier\Webhook\WebhookEvent;
+
+class UpdateOrderStatus
+{
+    public function handle(WebhookEvent $event): void
+    {
+        // Access normalized event data
+        $order = Order::where('tracking_number', $event->trackingNumber)
+            ->firstOrFail();
+
+        // Update status
+        $order->update([
+            'status' => $this->mapStatus($event->eventType),
+            'last_webhook_at' => now()
+        ]);
+
+        // Trigger business logic
+        if ($event->eventType === 'parcel.delivered') {
+            // Send notification, update inventory, etc.
+        }
+    }
+
+    protected function mapStatus(string $eventType): string
+    {
+        return match($eventType) {
+            'parcel.created' => 'pending_pickup',
+            'parcel.delivered' => 'delivered',
+            'parcel.returned' => 'returned',
+            default => 'processing'
+        };
+    }
+}
+```
+
+**5. Webhook Querying:**
+
+```php
+use Courier\Webhook\Models\WebhookLog;
+use Courier\Webhook\Models\CourierOrder;
+
+// Get webhook history for an order
+$webhooks = WebhookLog::where('tracking_number', $trackingId)
+    ->orderBy('timestamp', 'desc')
+    ->get();
+
+// Get all orders by status
+$deliveredOrders = CourierOrder::where('status', 'delivered')
+    ->where('courier', 'paperfly')
+    ->get();
+
+// Get failed webhooks
+$failedWebhooks = WebhookLog::where('processed', false)
+    ->where('retry_count', '>=', 3)
+    ->get();
+```
+
 ---
 
 ## Verification
@@ -433,7 +737,134 @@ try {
 7. **Test token refresh** (Pathao - wait for token expiry)
 8. **Verify caching** - check cache hit/miss
 9. **Test provider switching** - create orders with different providers
-10. **Run test suite** - ensure 100% coverage
+10. **Test webhooks** for all providers that support them
+11. **Run test suite** - ensure 100% coverage
+
+### Webhook Testing
+
+**1. Unit Tests:**
+
+```php
+class WebhookVerifierTest extends TestCase
+{
+    public function test_paperfly_webhook_verification()
+    {
+        $payload = [
+            'event' => 'parcel.created',
+            'timestamp' => now()->toIso8601String(),
+            'data' => [
+                'order_number' => 'Z-241225-174131-A1-A7',
+                'merchant_order_reference' => 'test123',
+                'barcode' => '231814375965',
+                'package_price' => 10,
+            ]
+        ];
+
+        $response = $this->postJson('/webhooks/paperfly', $payload, [
+            'X-Paperfly-Secret' => config('courier.paperfly.webhook.secret')
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseHas('webhook_logs', [
+            'courier' => 'paperfly',
+            'event_type' => 'parcel.created',
+            'tracking_number' => 'Z-241225-174131-A1-A7'
+        ]);
+    }
+
+    public function test_invalid_webhook_secret_rejected()
+    {
+        $response = $this->postJson('/webhooks/paperfly', [], [
+            'X-Paperfly-Secret' => 'invalid_secret'
+        ]);
+
+        $response->assertStatus(401);
+    }
+
+    public function test_duplicate_webhook_handling()
+    {
+        $payload = [/* ... */];
+
+        // Send same webhook twice
+        $this->postJson('/webhooks/paperfly', $payload, [
+            'X-Paperfly-Secret' => config('courier.paperfly.webhook.secret')
+        ]);
+
+        $response = $this->postJson('/webhooks/paperfly', $payload, [
+            'X-Paperfly-Secret' => config('courier.paperfly.webhook.secret')
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals(1, WebhookLog::count());
+    }
+}
+```
+
+**2. Integration Tests:**
+
+```php
+class WebhookIntegrationTest extends TestCase
+{
+    public function test_end_to_end_paperfly_webhook()
+    {
+        Event::fake();
+
+        $payload = [/* ... */];
+
+        $this->postJson('/webhooks/paperfly', $payload, [
+            'X-Paperfly-Secret' => config('courier.paperfly.webhook.secret')
+        ]);
+
+        // Assert job was dispatched
+        Event::assertDispatched(WebhookReceived::class);
+
+        // Process job
+        Queue::assertPushed(ProcessWebhookEvent::class);
+
+        // Run job
+        $job = Queue::pushed(ProcessWebhookEvent::class)[0];
+        $job->handle(app(WebhookService::class));
+
+        // Assert order was created/updated
+        $this->assertDatabaseHas('courier_orders', [
+            'tracking_number' => 'Z-241225-174131-A1-A7',
+            'status' => 'pending_pickup'
+        ]);
+    }
+}
+```
+
+**3. Testing with Real Webhooks:**
+
+```bash
+# Use ngrok for local testing
+ngrok http 8000
+
+# Configure webhook URL with courier
+# https://abc123.ngrok.io/webhooks/paperfly
+
+# Send test webhook
+curl -X POST https://abc123.ngrok.io/webhooks/paperfly \
+  -H "X-Paperfly-Secret: your_secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event": "parcel.created",
+    "timestamp": "2025-12-24T17:28:24+00:00",
+    "data": {
+      "order_number": "TEST-123",
+      "merchant_order_reference": "test123",
+      "barcode": "123456789",
+      "package_price": 100,
+      "recipient": {
+        "name": "Test Customer",
+        "phone": "01685048848",
+        "address": "Test Address"
+      }
+    }
+  }'
+```
 
 ### Critical Files to Test
 
@@ -452,7 +883,39 @@ This plan provides a complete roadmap for building a Laravel courier package fol
 1. **Phase 1 (Days 1-3):** Core architecture - Manager, Facade, ServiceProvider, Interfaces
 2. **Phase 2 (Days 4-7):** First provider - Steadfast with all result classes and support utilities
 3. **Phase 3 (Days 8-14):** Remaining providers - RedX, Carrybee, Pathao, Paperfly
-4. **Phase 4 (Days 15-18):** Advanced features - Caching, token management, webhooks
+4. **Phase 4 (Days 15-18):** Webhook integration system - Unified webhook handling for all providers
 5. **Phase 5 (Days 19-21):** Testing and documentation
 
-The package will handle 5 different authentication methods, normalize responses across all providers, support bulk operations, manage OAuth tokens automatically, and provide a consistent, elegant API for developers.
+The package will:
+- Handle 5 different authentication methods (API Key, Bearer Token, Multi-header, OAuth 2.0, Basic Auth)
+- Normalize responses across all providers
+- Support bulk operations (where available)
+- Manage OAuth tokens automatically with refresh
+- Process webhooks from 4 couriers with 66+ total events
+- Provide a consistent, elegant API for developers
+- Support real-time order status updates via webhooks
+- Include comprehensive logging and monitoring
+
+### Webhook Coverage Summary
+
+| Courier | Webhook Support | Events | Authentication |
+|---------|----------------|--------|----------------|
+| **Paperfly** | ✅ Full | 14 events | Secret Header |
+| **RedX** | ✅ Full | 7 events | Query Token |
+| **Carrybee** | ✅ Full | 24 events | Signature Header |
+| **Pathao** | ✅ Full | 21 events | Signature + Response |
+| **Steadfast** | ❌ None | 0 events | Polling required |
+| **Total** | 4/5 providers | 66 events | 4 methods |
+
+### Key Webhook Features
+
+1. **Unified Interface:** Single endpoint pattern for all couriers
+2. **Automatic Normalization:** Convert different payload formats to unified events
+3. **Authentication:** Verify webhooks from each courier using their specific method
+4. **Idempotency:** Prevent duplicate webhook processing
+5. **Async Processing:** Queue-based processing for performance
+6. **Comprehensive Logging:** Full audit trail of all webhooks
+7. **Event Mapping:** Map courier-specific events to internal events
+8. **Error Handling:** Robust error handling with retry logic
+9. **Testing Support:** Complete testing suite with mocks and integration tests
+10. **Monitoring:** Built-in metrics and alerting capabilities
